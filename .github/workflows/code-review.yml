@@ -12,74 +12,94 @@ jobs:
   code-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          python-version: '3.x'
+          node-version: '16'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: npm install axios
 
-      - name: Perform code review
+      - name: Perform code review and post results
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_PULL_REQUEST: ${{ github.event.pull_request.number }}
         run: |
-          python <<EOF
-          import os
-          import requests
+          node <<EOF
+          const axios = require('axios');
 
-          # 環境変数からキーを取得
-          GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
-          GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
-          GITHUB_PULL_REQUEST = os.getenv('GITHUB_PULL_REQUEST')
+          const githubToken = process.env.GITHUB_TOKEN;
+          const geminiApiKey = process.env.GEMINI_API_KEY;
+          const repository = process.env.GITHUB_REPOSITORY;
+          const pullRequestNumber = process.env.GITHUB_PULL_REQUEST;
 
-          MODEL = 'gemini-1.5-flash'
-          PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
+          const githubApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/files`;
+          const geminiApiUrl = 'https://generativelanguage.googleapis.com/v1beta/chat/completions';
 
-          # GitHub APIからPull Requestの差分を取得
-          github_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}'
-          headers = {
-              'Authorization': f'Bearer {GITHUB_TOKEN}',
-              'Accept': 'application/vnd.github.v3.diff'
-          }
-          response = requests.get(github_api_url, headers=headers)
-
-          if response.status_code == 200:
-              diff = response.text
-          else:
-              print(f'GitHub APIエラー: {response.status_code} - {response.text}')
-              exit(1)
-
-          # Gemini APIにリクエストを送信
-          gemini_headers = {
-              'Authorization': f'Bearer {GEMINI_API_KEY}',
+          const headers = {
+              Authorization: `Bearer ${githubToken}`,
               'Content-Type': 'application/json',
+          };
+
+          async function fetchChangedFiles() {
+              const response = await axios.get(githubApiUrl, { headers });
+              return response.data; // 変更されたファイルリスト
           }
 
-          data = {
-              'model': MODEL,
-              'messages': [
-                  {'role': 'system', 'content': 'あなたは優秀なコードレビュアーです。'},
-                  {'role': 'user', 'content': f'{PROMPT}\n\n{diff}'},
-              ],
+          async function reviewCode(diff) {
+              const geminiHeaders = {
+                  Authorization: `Bearer ${geminiApiKey}`,
+                  'Content-Type': 'application/json',
+              };
+
+              const data = {
+                  model: 'gemini-1.5-flash',
+                  messages: [
+                      { role: 'system', content: 'あなたは優秀なコードレビュアーです。' },
+                      { role: 'user', content: `以下のコード差分をレビューしてください:\n\n${diff}` },
+                  ],
+              };
+
+              const response = await axios.post(geminiApiUrl, data, { headers: geminiHeaders });
+              return response.data.choices[0].message.content; // レビューコメント
           }
 
-          gemini_response = requests.post(
-              'https://generativelanguage.googleapis.com/v1beta/chat/completions',
-              headers=gemini_headers,
-              json=data
-          )
+          async function postReviewComment(file, line, comment) {
+              const reviewUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/comments`;
 
-          if gemini_response.status_code == 200:
-              review_comments = gemini_response.json()['choices'][0]['message']['content']
-              print(f'コードレビュー結果:\n{review_comments}')
-              # TODO: GitHubにレビューコメントを投稿する処理を追加
-          else:
-              print(f'Gemini APIエラー: {gemini_response.status_code} - {gemini_response.text}')
+              const payload = {
+                  body: comment,
+                  path: file,
+                  line: line,
+                  side: 'RIGHT', // 変更後のコードにコメントする
+              };
+
+              await axios.post(reviewUrl, payload, { headers });
+          }
+
+          async function main() {
+              const changedFiles = await fetchChangedFiles();
+
+              for (const file of changedFiles) {
+                  const { filename, patch } = file;
+
+                  const lines = patch.split('\n');
+                  for (let i = 0; i < lines.length; i++) {
+                      if (lines[i].startsWith('+') && !lines[i].startsWith('+++')) {
+                          const lineContent = lines[i].substring(1);
+                          const reviewComment = await reviewCode(lineContent);
+
+                          await postReviewComment(filename, i + 1, reviewComment);
+                      }
+                  }
+              }
+
+              console.log('レビューコメントをPRに追加しました');
+          }
+
+          main().catch(error => {
+              console.error('エラー:', error.response ? error.response.data : error.message);
+          });
           EOF
