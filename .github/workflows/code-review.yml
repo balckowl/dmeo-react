@@ -39,7 +39,7 @@ jobs:
           GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
           GITHUB_PULL_REQUEST = os.getenv('GITHUB_PULL_REQUEST')
-          MODEL = 'gemini-1.5-pro'
+          MODEL = 'gemini-1.5-flash'
           PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
 
           # GitHub APIからPull Requestの詳細を取得
@@ -73,14 +73,14 @@ jobs:
                   continue
 
               # 変更行を抽出
-              lines = patch.split('\n')
+              lines = patch.split('\\n')
               line_number = 0
               for line in lines:
                   if line.startswith('@@'):
                       # 行番号情報を抽出
-                      match = re.search(r'\+(\d+)', line)
+                      match = re.search(r'\\+\\d+', line)
                       if match:
-                          line_number = int(match.group(1)) - 1
+                          line_number = int(match.group(0)) - 1
                   elif line.startswith('+') and not line.startswith('+++'):
                       line_number += 1
                       code_line = line[1:]
@@ -93,7 +93,7 @@ jobs:
                       data = {
                           'model': MODEL,
                           'messages': [
-                              {'role': 'system', 'content': 'あなたは優秀なコードレビュアーです。'},
+                              {'role': 'system', 'content': 'あなたは簡潔なコードレビュアーです。'},
                               {'role': 'user', 'content': f'{PROMPT}\n\n{code_line}'},
                           ],
                       }
@@ -103,23 +103,26 @@ jobs:
                           json=data
                       )
                       if gemini_response.status_code == 200:
-                          review_comment = gemini_response.json()['choices'][0]['message']['content']
-                          print(f'レビューコメント: {review_comment}')
+                          review_comment = gemini_response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                          if review_comment:
+                              # コメントが長すぎる場合、最初の1行だけを利用
+                              review_comment = review_comment.split('\\n')[0]
+                              print(f'レビューコメント: {review_comment}')
 
-                          # GitHubにコメントを投稿
-                          comment_data = {
-                              'body': review_comment,
-                              'commit_id': commit_id,
-                              'path': filename,
-                              'line': line_number,
-                              'side': 'RIGHT'
-                          }
-                          comment_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/comments'
-                          comment_response = requests.post(comment_api_url, headers=headers, json=comment_data)
-                          if comment_response.status_code == 201:
-                              print(f'コメントを投稿しました: {filename} の {line_number} 行目')
-                          else:
-                              print(f'コメントの投稿に失敗しました: {comment_response.status_code} - {comment_response.text}')
+                              # GitHubにコメントを投稿
+                              comment_data = {
+                                  'body': review_comment,
+                                  'commit_id': commit_id,
+                                  'path': filename,
+                                  'line': line_number,
+                                  'side': 'RIGHT'
+                              }
+                              comment_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/comments'
+                              comment_response = requests.post(comment_api_url, headers=headers, json=comment_data)
+                              if comment_response.status_code == 201:
+                                  print(f'コメントを投稿しました: {filename} の {line_number} 行目')
+                              else:
+                                  print(f'コメントの投稿に失敗しました: {comment_response.status_code} - {comment_response.text}')
                       else:
                           print(f'Gemini APIエラー: {gemini_response.status_code} - {gemini_response.text}')
           EOF
