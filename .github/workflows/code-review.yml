@@ -1,0 +1,62 @@
+name: Code Review
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          pip install requests
+      - name: Code Review with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python <<EOF
+          import os
+          import requests
+
+          GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+          MODEL = 'gemini-1.5-flash'  # 使用するモデルを指定
+          PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
+
+          # ここでGitHubからプルリクエストの差分を取得する処理を追加
+
+          headers = {
+              'Authorization': f'Bearer {GEMINI_API_KEY}',
+              'Content-Type': 'application/json',
+          }
+
+          data = {
+              'model': MODEL,
+              'messages': [
+                  {'role': 'system', 'content': 'あなたは優秀なコードレビュアーです。'},
+                  {'role': 'user', 'content': f'{PROMPT}\n\n{diff}'},
+              ],
+          }
+
+          response = requests.post(
+              'https://generativelanguage.googleapis.com/v1beta/chat/completions',
+              headers=headers,
+              json=data
+          )
+
+          if response.status_code == 200:
+              review_comments = response.json()['choices'][0]['message']['content']
+              print(f'コードレビュー結果:\n{review_comments}')
+              # ここでGitHubのプルリクエストにコメントを投稿する処理を追加
+          else:
+              print(f'エラー: {response.status_code} - {response.text}')
+          EOF
