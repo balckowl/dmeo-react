@@ -39,28 +39,17 @@ jobs:
           MODEL = 'gemini-1.5-flash'
           PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
 
-          # GitHub APIからPull Requestの変更ファイルとコミットIDを取得
+          # GitHub APIからPull Requestの変更ファイルと差分を取得
           github_files_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/files'
-          github_pr_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}'
           headers = {
               'Authorization': f'Bearer {GITHUB_TOKEN}',
               'Accept': 'application/vnd.github.v3+json'
           }
-
-          # コミットIDを取得
-          pr_response = requests.get(github_pr_url, headers=headers)
-          if pr_response.status_code == 200:
-              commit_id = pr_response.json()['head']['sha']
+          response = requests.get(github_files_url, headers=headers)
+          if response.status_code == 200:
+              files = response.json()
           else:
-              print(f'GitHub APIエラー: {pr_response.status_code} - {pr_response.text}')
-              exit(1)
-
-          # 変更ファイルの取得
-          files_response = requests.get(github_files_url, headers=headers)
-          if files_response.status_code == 200:
-              files = files_response.json()
-          else:
-              print(f'GitHub APIエラー: {files_response.status_code} - {files_response.text}')
+              print(f'GitHub APIエラー: {response.status_code} - {response.text}')
               exit(1)
 
           # Gemini APIでレビュー結果を生成し、GitHubにコメントを投稿
@@ -94,7 +83,10 @@ jobs:
                           json=gemini_data
                       )
                       if gemini_response.status_code == 200:
-                          review_comment = gemini_response.json()['choices'][0]['message']['content']
+                          review_comment = gemini_response.json().get('choices', [{}])[0].get('message', {}).get('content', '')
+                          if not review_comment:
+                              print('Gemini APIからレビュー結果が取得できませんでした')
+                              continue
                       else:
                           print(f'Gemini APIエラー: {gemini_response.status_code} - {gemini_response.text}')
                           continue
@@ -103,9 +95,12 @@ jobs:
                       github_comment_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/comments'
                       comment_data = {
                           'body': review_comment,
-                          'commit_id': commit_id,
+                          'commit_id': file['sha'],  # ファイルのSHA
                           'path': filename,
-                          'line': position
+                          'line': position,
+                          'side': 'RIGHT',
+                          'start_side': 'RIGHT',
+                          'diff_hunk': file['patch'],  # 差分内容を提供
                       }
                       comment_response = requests.post(github_comment_url, headers=headers, json=comment_data)
                       if comment_response.status_code == 201:
