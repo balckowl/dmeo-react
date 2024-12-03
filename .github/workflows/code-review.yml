@@ -36,6 +36,18 @@ jobs:
           const repository = process.env.GITHUB_REPOSITORY;
           const pullRequestNumber = process.env.GITHUB_PULL_REQUEST;
 
+          // 必須の環境変数が未設定の場合、エラーを出力して終了
+          if (!githubToken || !geminiApiKey || !repository || !pullRequestNumber) {
+              console.error("必要な環境変数が設定されていません。");
+              console.error({
+                  githubToken,
+                  geminiApiKey,
+                  repository,
+                  pullRequestNumber,
+              });
+              process.exit(1);
+          }
+
           // 必要なURLを組み立て
           const githubApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/files`;
           const commentsApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/comments`;
@@ -48,8 +60,13 @@ jobs:
 
           // GitHub APIから変更されたファイルを取得
           async function fetchChangedFiles() {
-              const response = await axios.get(githubApiUrl, { headers });
-              return response.data; // 変更されたファイルリスト
+              try {
+                  const response = await axios.get(githubApiUrl, { headers });
+                  return response.data; // 変更されたファイルリスト
+              } catch (error) {
+                  console.error("GitHub APIから変更されたファイルの取得に失敗しました。", error.response ? error.response.data : error.message);
+                  process.exit(1);
+              }
           }
 
           // Gemini APIでコードをレビュー
@@ -67,8 +84,13 @@ jobs:
                   ],
               };
 
-              const response = await axios.post(geminiApiUrl, data, { headers: geminiHeaders });
-              return response.data.choices[0].message.content; // レビューコメント
+              try {
+                  const response = await axios.post(geminiApiUrl, data, { headers: geminiHeaders });
+                  return response.data.choices[0].message.content; // レビューコメント
+              } catch (error) {
+                  console.error("Gemini APIでのコードレビューに失敗しました。", error.response ? error.response.data : error.message);
+                  process.exit(1);
+              }
           }
 
           // GitHubにコメントを投稿
@@ -80,7 +102,12 @@ jobs:
                   side: 'RIGHT', // 変更後のコードにコメントする
               };
 
-              await axios.post(commentsApiUrl, payload, { headers });
+              try {
+                  await axios.post(commentsApiUrl, payload, { headers });
+              } catch (error) {
+                  console.error("GitHubにコメントを投稿できませんでした。", error.response ? error.response.data : error.message);
+                  process.exit(1);
+              }
           }
 
           // メイン処理
