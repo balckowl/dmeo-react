@@ -29,13 +29,11 @@ jobs:
         run: |
           node <<EOF
           const axios = require('axios');
-
           // 環境変数の読み込み
           const githubToken = process.env.GITHUB_TOKEN;
           const geminiApiKey = process.env.GEMINI_API_KEY;
           const repository = process.env.GITHUB_REPOSITORY;
           const pullRequestNumber = process.env.GITHUB_PULL_REQUEST;
-
           // 環境変数の検証
           if (!githubToken || !geminiApiKey || !repository || !pullRequestNumber) {
               console.error("必要な環境変数が設定されていません。");
@@ -47,17 +45,14 @@ jobs:
               });
               process.exit(1);
           }
-
           // 必要なURLを組み立て
           const githubApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/files`;
           const commentsApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/comments`;
           const geminiApiUrl = 'https://generativelanguage.googleapis.com/v1beta/chat/completions';
-
           const headers = {
               Authorization: `Bearer ${githubToken}`,
               'Content-Type': 'application/json',
           };
-
           // GitHub APIから変更されたファイルを取得
           async function fetchChangedFiles() {
               try {
@@ -68,14 +63,12 @@ jobs:
                   process.exit(1);
               }
           }
-
           // Gemini APIでコードをレビュー
           async function reviewCode(diff) {
               const geminiHeaders = {
                   Authorization: `Bearer ${geminiApiKey}`,
                   'Content-Type': 'application/json',
               };
-
               const data = {
                   model: 'gemini-1.5-flash',
                   messages: [
@@ -83,7 +76,6 @@ jobs:
                       { role: 'user', content: `以下のコード差分をレビューしてください:\n\n${diff}` },
                   ],
               };
-
               try {
                   const response = await axios.post(geminiApiUrl, data, { headers: geminiHeaders });
                   return response.data.choices[0].message.content; // レビューコメント
@@ -92,7 +84,6 @@ jobs:
                   process.exit(1);
               }
           }
-
           // GitHubにコメントを投稿
           async function postReviewComment(file, line, comment) {
               const payload = {
@@ -101,7 +92,6 @@ jobs:
                   line: line,
                   side: 'RIGHT', // 変更後のコードにコメントする
               };
-
               try {
                   await axios.post(commentsApiUrl, payload, { headers });
               } catch (error) {
@@ -109,28 +99,22 @@ jobs:
                   process.exit(1);
               }
           }
-
           // メイン処理
           async function main() {
               const changedFiles = await fetchChangedFiles();
-
               for (const file of changedFiles) {
                   const { filename, patch } = file;
-
                   const lines = patch.split('\n');
                   for (let i = 0; i < lines.length; i++) {
                       if (lines[i].startsWith('+') && !lines[i].startsWith('+++')) {
                           const lineContent = lines[i].substring(1);
                           const reviewComment = await reviewCode(lineContent);
-
                           await postReviewComment(filename, i + 1, reviewComment);
                       }
                   }
               }
-
               console.log('レビューコメントをPRに追加しました');
           }
-
           // 実行
           main().catch(error => {
               console.error('エラー:', error.response ? error.response.data : error.message);
