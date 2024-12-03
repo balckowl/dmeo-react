@@ -65,9 +65,12 @@ jobs:
               print(f'GitHub APIエラー: {diff_response.status_code} - {diff_response.text}')
               exit(1)
 
-          # 各変更ファイルを処理
+          # `/src`ディレクトリに限定してファイルを処理
           for file in files_changed:
               filename = file['filename']
+              if not filename.startswith('src/'):  # `/src`配下のファイルのみ処理
+                  continue
+
               patch = file.get('patch')
               if not patch:
                   continue
