@@ -30,12 +30,15 @@ jobs:
           node <<EOF
           const axios = require('axios');
 
+          // 環境変数の読み込み
           const githubToken = process.env.GITHUB_TOKEN;
           const geminiApiKey = process.env.GEMINI_API_KEY;
           const repository = process.env.GITHUB_REPOSITORY;
           const pullRequestNumber = process.env.GITHUB_PULL_REQUEST;
 
+          // 必要なURLを組み立て
           const githubApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/files`;
+          const commentsApiUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/comments`;
           const geminiApiUrl = 'https://generativelanguage.googleapis.com/v1beta/chat/completions';
 
           const headers = {
@@ -43,11 +46,13 @@ jobs:
               'Content-Type': 'application/json',
           };
 
+          // GitHub APIから変更されたファイルを取得
           async function fetchChangedFiles() {
               const response = await axios.get(githubApiUrl, { headers });
               return response.data; // 変更されたファイルリスト
           }
 
+          // Gemini APIでコードをレビュー
           async function reviewCode(diff) {
               const geminiHeaders = {
                   Authorization: `Bearer ${geminiApiKey}`,
@@ -66,9 +71,8 @@ jobs:
               return response.data.choices[0].message.content; // レビューコメント
           }
 
+          // GitHubにコメントを投稿
           async function postReviewComment(file, line, comment) {
-              const reviewUrl = `https://api.github.com/repos/${repository}/pulls/${pullRequestNumber}/comments`;
-
               const payload = {
                   body: comment,
                   path: file,
@@ -76,9 +80,10 @@ jobs:
                   side: 'RIGHT', // 変更後のコードにコメントする
               };
 
-              await axios.post(reviewUrl, payload, { headers });
+              await axios.post(commentsApiUrl, payload, { headers });
           }
 
+          // メイン処理
           async function main() {
               const changedFiles = await fetchChangedFiles();
 
@@ -99,6 +104,7 @@ jobs:
               console.log('レビューコメントをPRに追加しました');
           }
 
+          // 実行
           main().catch(error => {
               console.error('エラー:', error.response ? error.response.data : error.message);
           });
