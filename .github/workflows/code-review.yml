@@ -74,17 +74,15 @@ jobs:
 
               # 変更行を抽出
               lines = patch.split('\\n')
-              line_number = 0
               hunk_start = 0
-              for line in lines:
+              for i, line in enumerate(lines):
                   if line.startswith('@@'):
                       # 行番号情報を抽出
-                      match = re.search(r'\\+(\\d+)', line)
+                      match = re.search(r'\\+\\d+', line)
                       if match:
-                          hunk_start = int(match.group(1)) - 1
-                          line_number = hunk_start
+                          hunk_start = int(match.group(0)) - 1
                   elif line.startswith('+') and not line.startswith('+++'):
-                      line_number += 1
+                      line_number = hunk_start + i + 1
                       code_line = line[1:]
 
                       # Gemini APIにリクエストを送信
@@ -107,8 +105,9 @@ jobs:
                       if gemini_response.status_code == 200:
                           review_comment = gemini_response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
                           if review_comment:
-                              # 修正案をdiff形式でコメントに含める
-                              review_comment = f'```diff\\n- {line[1:]}\\n+ {code_line}\\n```\n\n{review_comment}'
+                              # 修正案をGitHub suggestion形式でコメントに含める
+                              suggestion = f"```suggestion\n{code_line.replace('worldd', 'world')}\n```"
+                              review_comment = f"{review_comment}\n\n{suggestion}"
                               print(f'レビューコメント: {review_comment}')
 
                               # GitHubにコメントを投稿
