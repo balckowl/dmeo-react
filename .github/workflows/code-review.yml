@@ -105,8 +105,8 @@ jobs:
                       if gemini_response.status_code == 200:
                           review_comment = gemini_response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
                           if review_comment:
-                              # コメントが長すぎる場合、最初の1行だけを利用
-                              review_comment = review_comment.split('\\n')[0]
+                              # 修正点をdiff形式でコメントに含める
+                              review_comment = f'```diff\\n{patch}\\n```\n\n{review_comment}'
                               print(f'レビューコメント: {review_comment}')
 
                               # GitHubにコメントを投稿
