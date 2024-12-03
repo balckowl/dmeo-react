@@ -21,6 +21,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests
+
       - name: Perform code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,7 +32,9 @@ jobs:
           python <<EOF
           import os
           import requests
+          import re
 
+          # 環境変数からキーを取得
           GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
           GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
@@ -39,72 +42,84 @@ jobs:
           MODEL = 'gemini-1.5-flash'
           PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
 
-          # GitHub APIからPull Requestの変更ファイルと差分を取得
-          github_files_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/files'
+          # GitHub APIからPull Requestの詳細を取得
+          pr_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}'
           headers = {
               'Authorization': f'Bearer {GITHUB_TOKEN}',
               'Accept': 'application/vnd.github.v3+json'
           }
-          response = requests.get(github_files_url, headers=headers)
-          if response.status_code == 200:
-              files = response.json()
+          pr_response = requests.get(pr_api_url, headers=headers)
+          if pr_response.status_code == 200:
+              pr_data = pr_response.json()
+              commit_id = pr_data['head']['sha']
           else:
-              print(f'GitHub APIエラー: {response.status_code} - {response.text}')
+              print(f'GitHub APIエラー: {pr_response.status_code} - {pr_response.text}')
               exit(1)
 
-          # Gemini APIでレビュー結果を生成し、GitHubにコメントを投稿
-          for file in files:
+          # GitHub APIからPull Requestの差分を取得
+          diff_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/files'
+          diff_response = requests.get(diff_api_url, headers=headers)
+          if diff_response.status_code == 200:
+              files_changed = diff_response.json()
+          else:
+              print(f'GitHub APIエラー: {diff_response.status_code} - {diff_response.text}')
+              exit(1)
+
+          # 各変更ファイルを処理
+          for file in files_changed:
               filename = file['filename']
-              patch = file.get('patch', '')
+              patch = file.get('patch')
               if not patch:
                   continue
 
-              lines = patch.split('\\n')
-              position = 0
+              # 変更行を抽出
+              lines = patch.split('\n')
+              line_number = 0
               for line in lines:
-                  if line.startswith('+') and not line.startswith('+++'):
-                      code_snippet = line[1:]  # '+'を除去
+                  if line.startswith('@@'):
+                      # 行番号情報を抽出
+                      match = re.search(r'\+(\d+)', line)
+                      if match:
+                          line_number = int(match.group(1)) - 1
+                  elif line.startswith('+') and not line.startswith('+++'):
+                      line_number += 1
+                      code_line = line[1:]
 
-                      # Gemini APIリクエスト
+                      # Gemini APIにリクエストを送信
                       gemini_headers = {
                           'Authorization': f'Bearer {GEMINI_API_KEY}',
                           'Content-Type': 'application/json',
                       }
-                      gemini_data = {
+                      data = {
                           'model': MODEL,
                           'messages': [
                               {'role': 'system', 'content': 'あなたは優秀なコードレビュアーです。'},
-                              {'role': 'user', 'content': f'{PROMPT}\n\n{code_snippet}'},
+                              {'role': 'user', 'content': f'{PROMPT}\n\n{code_line}'},
                           ],
                       }
                       gemini_response = requests.post(
                           'https://generativelanguage.googleapis.com/v1beta/chat/completions',
                           headers=gemini_headers,
-                          json=gemini_data
+                          json=data
                       )
                       if gemini_response.status_code == 200:
-                          review_comment = gemini_response.json().get('choices', [{}])[0].get('message', {}).get('content', '')
-                          if not review_comment:
-                              print('Gemini APIからレビュー結果が取得できませんでした')
-                              continue
+                          review_comment = gemini_response.json()['choices'][0]['message']['content']
+                          print(f'レビューコメント: {review_comment}')
+
+                          # GitHubにコメントを投稿
+                          comment_data = {
+                              'body': review_comment,
+                              'commit_id': commit_id,
+                              'path': filename,
+                              'line': line_number,
+                              'side': 'RIGHT'
+                          }
+                          comment_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/comments'
+                          comment_response = requests.post(comment_api_url, headers=headers, json=comment_data)
+                          if comment_response.status_code == 201:
+                              print(f'コメントを投稿しました: {filename} の {line_number} 行目')
+                          else:
+                              print(f'コメントの投稿に失敗しました: {comment_response.status_code} - {comment_response.text}')
                       else:
                           print(f'Gemini APIエラー: {gemini_response.status_code} - {gemini_response.text}')
-                          continue
-
-                      # GitHubにコメントを投稿
-                      github_comment_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}/comments'
-                      comment_data = {
-                          'body': review_comment,
-                          'commit_id': file['sha'],  # ファイルのSHA
-                          'path': filename,
-                          'line': position,
-                          'side': 'RIGHT',
-                          'start_side': 'RIGHT',
-                          'diff_hunk': file['patch'],  # 差分内容を提供
-                      }
-                      comment_response = requests.post(github_comment_url, headers=headers, json=comment_data)
-                      if comment_response.status_code == 201:
-                          print(f'コメントを追加しました: {review_comment}')
-                      else:
-                          print(f'コメントの投稿に失敗しました: {comment_response.status_code} - {comment_response.text}')
           EOF
