@@ -40,7 +40,7 @@ jobs:
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
           GITHUB_PULL_REQUEST = os.getenv('GITHUB_PULL_REQUEST')
           MODEL = 'gemini-1.5-flash'
-          PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
+          PROMPT = '以下のコード差分をレビューし、不明点や不規則性がある場合は修正案を提案してください。'
 
           # GitHub APIからPull Requestの詳細を取得
           pr_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}'
@@ -72,15 +72,14 @@ jobs:
               if not patch:
                   continue
 
-              # 変更行を抽出
+              # 差分の解析
               lines = patch.split('\\n')
               hunk_start = 0
               for i, line in enumerate(lines):
                   if line.startswith('@@'):
-                      # 行番号情報を抽出
                       match = re.search(r'\\+\\d+', line)
                       if match:
-                          hunk_start = int(match.group(0)) - 1
+                          hunk_start = int(match.group(1)) - 1
                   elif line.startswith('+') and not line.startswith('+++'):
                       line_number = hunk_start + i + 1
                       code_line = line[1:]
@@ -93,7 +92,7 @@ jobs:
                       data = {
                           'model': MODEL,
                           'messages': [
-                              {'role': 'system', 'content': 'あなたは簡潔なコードレビュアーです。'},
+                              {'role': 'system', 'content': 'あなたは簡潔かつ有益なコードレビュアーです。'},
                               {'role': 'user', 'content': f'{PROMPT}\n\n{code_line}'},
                           ],
                       }
@@ -103,10 +102,12 @@ jobs:
                           json=data
                       )
                       if gemini_response.status_code == 200:
-                          review_comment = gemini_response.json().get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                          gemini_result = gemini_response.json()
+                          review_comment = gemini_result.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                          
                           if review_comment:
-                              # 修正案をGitHub suggestion形式でコメントに含める
-                              suggestion = f"```suggestion\n{code_line.replace('worldd', 'world')}\n```"
+                              # 修正案をsuggesion形式で生成
+                              suggestion = f"```suggestion\n{code_line}\n```"  # 必要に応じて修正案を生成
                               review_comment = f"{review_comment}\n\n{suggestion}"
                               print(f'レビューコメント: {review_comment}')
 
