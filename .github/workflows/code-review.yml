@@ -36,7 +36,7 @@ jobs:
           const repository = process.env.GITHUB_REPOSITORY;
           const pullRequestNumber = process.env.GITHUB_PULL_REQUEST;
 
-          // 必須の環境変数が未設定の場合、エラーを出力して終了
+          // 環境変数の検証
           if (!githubToken || !geminiApiKey || !repository || !pullRequestNumber) {
               console.error("必要な環境変数が設定されていません。");
               console.error({
