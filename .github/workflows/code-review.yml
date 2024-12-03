@@ -39,7 +39,7 @@ jobs:
           GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
           GITHUB_PULL_REQUEST = os.getenv('GITHUB_PULL_REQUEST')
-          MODEL = 'gemini-1.5-flash'
+          MODEL = 'gemini-1.5-pro'
           PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
 
           # GitHub APIからPull Requestの詳細を取得
