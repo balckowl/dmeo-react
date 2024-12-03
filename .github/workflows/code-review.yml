@@ -21,7 +21,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests
-
       - name: Perform code review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -32,16 +31,13 @@ jobs:
           python <<EOF
           import os
           import requests
-
           # 環境変数からキーを取得
           GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
           GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
           GITHUB_PULL_REQUEST = os.getenv('GITHUB_PULL_REQUEST')
-
           MODEL = 'gemini-1.5-flash'
           PROMPT = '以下のコード差分に不明点や不規則性がないか確認してください:'
-
           # GitHub APIからPull Requestの差分を取得
           github_api_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/pulls/{GITHUB_PULL_REQUEST}'
           headers = {
@@ -49,19 +45,16 @@ jobs:
               'Accept': 'application/vnd.github.v3.diff'
           }
           response = requests.get(github_api_url, headers=headers)
-
           if response.status_code == 200:
               diff = response.text
           else:
               print(f'GitHub APIエラー: {response.status_code} - {response.text}')
               exit(1)
-
           # Gemini APIにリクエストを送信
           gemini_headers = {
               'Authorization': f'Bearer {GEMINI_API_KEY}',
               'Content-Type': 'application/json',
           }
-
           data = {
               'model': MODEL,
               'messages': [
@@ -69,17 +62,28 @@ jobs:
                   {'role': 'user', 'content': f'{PROMPT}\n\n{diff}'},
               ],
           }
-
           gemini_response = requests.post(
               'https://generativelanguage.googleapis.com/v1beta/chat/completions',
               headers=gemini_headers,
               json=data
           )
-
           if gemini_response.status_code == 200:
               review_comments = gemini_response.json()['choices'][0]['message']['content']
               print(f'コードレビュー結果:\n{review_comments}')
-              # TODO: GitHubにレビューコメントを投稿する処理を追加
+              # GitHubにレビューコメントを投稿
+              comment_url = f'https://api.github.com/repos/{GITHUB_REPOSITORY}/issues/{GITHUB_PULL_REQUEST}/comments'
+              comment_data = {
+                  'body': f'コードレビュー結果:\n\n{review_comments}'
+              }
+              comment_headers = {
+                  'Authorization': f'Bearer {GITHUB_TOKEN}',
+                  'Content-Type': 'application/json',
+              }
+              comment_response = requests.post(comment_url, headers=comment_headers, json=comment_data)
+              if comment_response.status_code == 201:
+                  print('レビューコメントをPRに追加しました')
+              else:
+                  print(f'コメントの投稿に失敗しました: {comment_response.status_code} - {comment_response.text}')
           else:
               print(f'Gemini APIエラー: {gemini_response.status_code} - {gemini_response.text}')
           EOF
